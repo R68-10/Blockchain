@@ -36,9 +36,8 @@ contract VotingSystem is ERC20, Ownable {
         _mint(to, amount);
     }
 
-    // Add more functions as needed
-    // - Function to allow voting (requires token balance)
-    // - Function to get proposal details
+    // Function to allow voting (requires token balance)
+    // Function to get proposal details
 }
 
 
