@@ -1,4 +1,4 @@
-# Sample Hardhat Project
+# Voting System implemnted by Smart Contract 
 
 This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.
 
@@ -13,4 +13,4 @@ npx hardhat ignition deploy ./ignition/modules/Lock.ts
 ```
 soures: 
 solidity by Example
-ChatGPT
+, ChatGPT
