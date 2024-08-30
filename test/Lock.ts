@@ -1,127 +1,172 @@
-import {
-  time,
-  loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+
+// @author: RaghadAlrefaei 
+
+// we have 5 test cases to test VotingSystem Smart Contract 
+// 1- Should mint and vote
+// 2- Don't allow multiple votes from the same address
+// 3- Pprevent unauthorized users from voting
+// 4- Approve the proposal when the number of yes is grater than 5
+// 5- Not accepting the proposal if the number of yes votes does not meet the required 
+
 import { expect } from "chai";
 import hre from "hardhat";
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("Voting", function () {
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+  //First Test Case:
+  //  this test case ensure that the user who have minted and doing voting 
+  //  can submitt without any issues
+  it("Should mint and vote", async function () {
+    const Voting = await hre.ethers.getContractFactory("VotingSystem");
+    const voting = await Voting.deploy();
+    await voting.waitForDeployment();
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await hre.ethers.getSigners();
+    const [owner, Raghad, notVoter] = await hre.ethers.getSigners();
 
-    const Lock = await hre.ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+    // minting 100 tokens for user and owner 
+    await voting.mint(owner.address, 100);
+    await voting.mint(Raghad.address, 100);
 
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
+    // submiting propsal for owner and user  
+    await voting.connect(owner).submitProposal("Proposal 1");
+    await voting.connect(Raghad).submitProposal("Proposal 2");
 
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
+    // submiting voting for owner and user  
+    await voting.connect(owner).vote(0, true);
+    await voting.connect(Raghad).vote(1, false);
 
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
+    const proposal1 = await voting.proposals(0);
+    const proposal2 = await voting.proposals(1);
 
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
+    expect(proposal1.yesVotes).to.equal(1);
+    expect(proposal1.noVotes).to.equal(0);
+    expect(proposal2.yesVotes).to.equal(0);
+    expect(proposal2.noVotes).to.equal(1);
 
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
-
-      expect(await hre.ethers.provider.getBalance(lock.target)).to.equal(
-        lockedAmount
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await hre.ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
-    });
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+//-------------------------------------------------------------------------------------------------------------------------------------
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+  //Second Test Case:
+  //  this test case is to ensure only one address can vote one time 
+  it("Don't allow multiple votes from the same address", async function () {
+    const Voting = await hre.ethers.getContractFactory("VotingSystem");
+    const voting = await Voting.deploy();
+    await voting.waitForDeployment();
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    const [owner, Raghad] = await hre.ethers.getSigners();
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
+    await voting.mint(owner.address, 100);
+    await voting.mint(Raghad.address, 100);
 
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
+    await voting.connect(owner).submitProposal("Proposal 1");
 
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // the owner will accept the cvote and not allowing multiple voting 
+    await voting.connect(owner).vote(0, true);
+    await expect(voting.connect(owner).vote(0, false)).to.be.revertedWith("Already Voted");
 
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
+    const proposal = await voting.proposals(0);
+    expect(proposal.yesVotes).to.equal(1);
+    expect(proposal.noVotes).to.equal(0);
 
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
-
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
-
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
   });
+
+//-------------------------------------------------------------------------------------------------------------------------------------
+
+  //Third Test Case:
+  //  this test case is restrict to prevent users from voting if they don't have tokens 
+  it("Prevent unauthorized users from voting", async function () {
+  const Voting = await hre.ethers.getContractFactory("VotingSystem");
+  const voting = await Voting.deploy();
+  await voting.waitForDeployment();
+
+  const [owner, Raghad, notVoter] = await hre.ethers.getSigners();
+
+  await voting.mint(owner.address, 100);
+  await voting.mint(Raghad.address, 100);
+
+  await voting.connect(owner).submitProposal("Proposal 1");
+
+  // this trigger the user with no tokens 
+  await expect(voting.connect(notVoter).vote(0, true)).to.be.revertedWith("You must have tokens");
+
+  const proposal = await voting.proposals(0);
+  expect(proposal.yesVotes).to.equal(0);
+  expect(proposal.noVotes).to.equal(0);
+
+  });
+
+//-------------------------------------------------------------------------------------------------------------------------------------
+
+  //Fourth Test Case:
+  //  this test case to ensure that unmer of yes is grater than 5 
+  it("Approve the proposal when the number of yes is grater than 5", async function () {
+    const Voting = await hre.ethers.getContractFactory("VotingSystem");
+    const voting = await Voting.deploy();
+    await voting.waitForDeployment();
+
+    // the 5 uses who votes "yes"
+    const [owner, Raghad, Mohammed, Rema, Bari] = await hre.ethers.getSigners();
+
+    await voting.mint(owner.address, 100);
+    await voting.mint(Raghad.address, 100);
+    await voting.mint(Mohammed.address, 100);
+    await voting.mint(Rema.address, 100);
+    await voting.mint(Bari.address, 100);
+
+    await voting.connect(owner).submitProposal("Proposal 1");
+
+    await voting.connect(owner).vote(0, true);
+    await voting.connect(Raghad).vote(0, true);
+    await voting.connect(Mohammed).vote(0, true);
+    await voting.connect(Rema).vote(0, true);
+    await voting.connect(Bari).vote(0, true);
+
+    // to call the proposal and view it 
+    const proposal = await voting.getProposal(0);
+
+    expect(proposal[3]).to.equal(5); // Yes votes
+    expect(proposal[4]).to.equal(0); // No votes
+
+    // to ensure the proposal is accepted 
+    const proposalStruct = await voting.proposals(0);
+    expect(proposalStruct.isApproved).to.equal(true);
+
+  });
+
+//-------------------------------------------------------------------------------------------------------------------------------------
+
+  //Fifth Test Case
+  // this test case to ensure that the proposal is not approved when the number of yes is less
+  it("Not accepting the proposal if the number of yes votes does not meet the required ", async function () {
+    const Voting = await hre.ethers.getContractFactory("VotingSystem");
+    const voting = await Voting.deploy();
+    await voting.waitForDeployment();
+
+    const [owner, Raghad] = await hre.ethers.getSigners();
+
+    await voting.mint(owner.address, 100);
+    await voting.mint(Raghad.address, 100);
+
+    await voting.connect(owner).submitProposal("Proposal 1");
+
+    await voting.connect(owner).vote(0, true);
+
+    // to call the proposal and view it 
+    const proposal = await voting.proposals(0);
+
+    // if the proposal is not approved
+    expect(proposal.yesVotes).to.equal(1);
+    expect(proposal.noVotes).to.equal(0);
+    expect(proposal.isApproved).to.equal(false);
+
+    // here to Check that no approval event was emitted
+    await expect(
+        voting.connect(Raghad).vote(0, false)
+    ).not.to.emit(voting, 'ProposalApproved');
+
+  });
+
 });
+
+
